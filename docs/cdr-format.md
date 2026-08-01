@@ -152,6 +152,19 @@ record is closed by a limit — volume, time, or a change in charging conditions
 — while the session runs. A **final** record is closed by a normal or terminal
 release. A short session yields a **single complete** record.
 
+**Time.** `duration` at record level is the wall-clock span the record covers.
+`timeUsage` in a container is the seconds that bucket was actually active
+within that span — a bucket may sit idle. Rating groups run concurrently, so
+container times overlap and do not sum to the record duration.
+
+**Conditions change within a session.** A change in access technology,
+serving network, quality of service, or tariff period closes the current
+container and opens a new one; it does not end the session. The correlation
+identifier is unchanged. Depending on configuration the record may also close,
+which is why those causes belong to the continues class. Consequently a single
+record can hold containers with different access technologies or serving
+networks.
+
 **Volumes are deltas.** Each record carries the volume accrued during its own
 interval, not a running total. A session total is the sum of its records; a gap
 in `recordSequenceNumber` means that sum is known to be incomplete.
@@ -226,9 +239,25 @@ AccountTransactionRecord ::= SEQUENCE {
   serviceClass        [10] ServiceClass,
   balanceBefore       [11] MoneyAmount,
   balanceAfter        [12] MoneyAmount,
-  voucherReference    [13] IA5String OPTIONAL,
-  activationDate      [14] TimeStamp OPTIONAL,
-  recordExtensions    [15] RecordExtensions OPTIONAL
+  refillChannel       [13] RefillChannel OPTIONAL,
+  voucherReference    [14] IA5String OPTIONAL,
+  activationDate      [15] TimeStamp OPTIONAL,
+  recordExtensions    [16] RecordExtensions OPTIONAL
+}
+
+-- Original: no public standard covers prepaid top-up channels.
+RefillChannel ::= ENUMERATED {
+  retailerPOS      (0),   -- pulsa counter, physical outlet
+  modernRetail     (1),   -- convenience-store chain
+  selfcareApp      (2),   -- operator application
+  mobileBanking    (3),
+  smsBanking       (4),
+  internetBanking  (5),
+  atm              (6),
+  eWallet          (7),
+  eCommerce        (8),
+  physicalVoucher  (9),   -- pairs with voucherReference
+  ussd            (10)
 }
 ```
 
@@ -320,26 +349,21 @@ MCC/MNC assignments and open geodata.
 
 ### Grain and coverage
 
-- **Container grain.** A data record carries one or more service-data
-  containers rather than record-level volumes. Silver either explodes
-  containers into rows or aggregates them per record; the choice sets the grain
-  everything downstream reads.
-- **Refill channel code** on the account transaction record. No public standard
-  covers these records, so the field would be original. It is the principal
-  dimension for top-up analysis.
-- **Enrichment has two distinct inputs.** Code lookups resolve values carried
-  in the record — cell to area, PLMN to operator, RAT to name, cause to class,
-  number prefix to country. Subscriber attributes such as package and segment
-  appear in no network record and are resolved by an as-of join against a
-  subscriber dimension. Different failure modes; documented separately.
+- **Subscriber dimension source.** Enrichment uses two mechanisms. Code
+  lookups resolve values carried in the record — rating group, serving PLMN,
+  cell, RAT, closure cause, number prefix — and fail when a code has no entry.
+  Dimension joins resolve attributes carried in no record at all, such as
+  package and segment, and fail when the subscriber is unknown or the wrong
+  version of an attribute is resolved. None of the three feeds is a subscriber
+  master, so this requires a decision: add a subscriber dimension input, or
+  derive what the account lifecycle feed supports — service class and its
+  changes — and treat package and segment as unavailable.
 
 ### Decisions
 
 - Whether usage records carry a remaining-balance figure alongside charge
   amount. Recommended not to: the account records already hold balance before
   and after, and duplicating it creates two sources of truth.
-- Whether `activationDate` is mandatory on activation events, since
-  service-period scoping depends on it.
 - Whether records carry a single fixed operator time zone or a per-record
   offset. Indonesia spans three zones; mixing conventions silently is a known
   source of error.
