@@ -156,7 +156,7 @@ open-source components, and on Databricks Free Edition unmodified.
 datagen/      synthetic events and reference data
 mediation/    binary decode
 pipelines/    bronze, silver, gold
-serving/      activity API and materialization
+serving/      history APIs
 docs/         format specification, design notes, decision records
 tests/        scenario and regression tests
 ```
