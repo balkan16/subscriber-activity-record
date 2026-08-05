@@ -27,8 +27,8 @@ operational system.
 | Abstract syntax | ASN.1 | ITU-T X.680 |
 | Encoding | BER (Tag–Length–Value) | ITU-T X.690 |
 | File container | header record + record stream | 3GPP TS 32.297 |
-| Record framing | `CHOICE` of variants, tagged by `RecordType` | 3GPP TS 32.298 |
-| Common types | `RecordType`, `IMSI` (TBCD-STRING), `MSISDN` (ISDN-AddressString), `TimeStamp`, `CallDuration`, `RecordExtensions` | 3GPP TS 32.298, `GenericChargingDataTypes` |
+| Record framing | `CHOICE` of variants, each alternative context-tagged | 3GPP TS 32.298 |
+| Common types | `RecordType`, `IMSI` (TBCD-STRING), `MSISDN` (ISDN-AddressString), `TimeStamp`, `CallDuration`, `ManagementExtensions` | 3GPP TS 32.298, `GenericChargingDataTypes` |
 | Money (account feeds only) | `MoneyAmount ::= SEQUENCE { valueDigits, exponent }` — exact decimal `valueDigits × 10^exponent`. Usage records carry no monetary value | IETF RFC 4006 unit-value shape |
 
 **Time.** `TimeStamp` carries local time with a signed offset, not UTC.
@@ -56,6 +56,21 @@ FileHeaderRecord ::= SEQUENCE {
 choice whose first alternative is the file header. These describe file
 structure; decoding is per record, since decoding a whole file at once would
 defeat the bounded-memory design.
+
+```asn1
+UsageCdrFile ::= SEQUENCE OF UsageRecord
+
+UsageRecord ::= CHOICE {
+  fileHeader   [0] FileHeaderRecord,
+  moCall       [1] MOCallRecord,
+  mtCall       [2] MTCallRecord,
+  moSMS        [3] MOSMSRecord,
+  mtSMS        [4] MTSMSRecord,
+  data         [5] PGWRecord
+}
+```
+
+The account file types appear in sections 2 and 3.
 
 **File closure.** A file closes on whichever comes first: a size ceiling
 (assumed 10 MB) or a maximum open interval. Arrival is therefore irregular —
@@ -92,14 +107,14 @@ Deviations, stated explicitly:
   plain equivalents. Encoded bytes are unaffected; only a length constraint is
   lost.
 - Types imported from non-charging specifications are replaced with minimal
-  local equivalents: `AddressString` and `ISDN-AddressString` from the MAP
-  common types, `ManagementExtension` from X.721.
+  local equivalents: `AddressString`, `ISDN-AddressString` and `IMEI` from the
+  MAP common types, `ManagementExtension` from X.721.
 - Composite types outside the platform's scope are simplified to their
   underlying carriers: `GSNAddress` to an octet string rather than the address
   choice, `SMSResult` to an integer rather than the diagnostics type, and
   `IMSI` and `Classmark` to octet strings.
-- `listOfTrafficVolumes` is not populated. Records carry `listOfServiceData`
-  only.
+- `listOfTrafficVolumes` is not declared at all, so no record can carry it.
+  Records carry `listOfServiceData` only.
 - Fields the specification marks OPTIONAL that this platform always emits are
   declared mandatory on `PGWRecord`: `servedMSISDN`, and `nodeID` with
   `localSequenceNumber`, which together form the duplicate key that ingestion
@@ -113,9 +128,12 @@ Mandatory in the specification and therefore retained: `recordType`,
 `p-GWAddress`, `chargingID`, `servingNodeAddress`, `recordOpeningTime`,
 `duration`, `causeForRecClosing`, `chargingCharacteristics`, `servingNodeType`.
 
-Retained from the optional fields: `servedIMSI`, `servedMSISDN`,
-`accessPointNameNI`, `recordSequenceNumber`, `nodeID`, `localSequenceNumber`,
-`servingNodePLMNIdentifier`, `rATType`, `listOfServiceData`.
+Retained from the optional fields: `servedIMSI`, `servedIMEI`, `servedMSISDN`,
+`accessPointNameNI`, `recordSequenceNumber`, `nodeID`, `recordExtensions`,
+`localSequenceNumber`, `servingNodePLMNIdentifier`, `rATType`, `mSTimeZone`,
+`cAMELChargingInformation`, `listOfServiceData`. Of these, `servedMSISDN`,
+`nodeID` and `localSequenceNumber` are declared mandatory here, as the
+deviation above records.
 
 The service data list holds `ChangeOfServiceCondition` entries — one per rating
 group per set of charging conditions. Within it, mandatory: `ratingGroup`,
@@ -144,12 +162,18 @@ field on usage records: rating occurs after a record is written. Usage records
 state what was consumed; the account feeds state what it cost and what the
 balance did.
 
-**Access technology.** `rATType` is a record-level field; the service data
-entries do not carry it. The simulated node is configured to close the record
-when the access technology changes — `causeForRecClosing` then carries
-`rATChange` — so a record never spans two technologies and the record-level
-value applies to every entry it contains. This is a configuration assumption,
-permitted by the specification, not a deviation from it.
+**Access technology.** The specification defines `rATType` both at record level
+and, as an optional field, on the service data entry. Only the record-level
+field is retained: carrying both would put one dimension in two places with no
+rule for resolving a disagreement.
+
+Access technology is therefore read from the record, and the simulated node is
+configured to close the record when it changes — `causeForRecClosing` then
+carries `rATChange` — so a record never spans two technologies and the
+record-level value applies to every entry it contains. This is a configuration
+assumption, permitted by the specification, not a deviation from it. It is
+load-bearing: a record that did span technologies would attribute all its
+entries to one value, with nothing in the data to reveal it.
 
 **Serving network.** `servingNodePLMNIdentifier` is likewise record level,
 supplying the roaming dimension per record.
@@ -163,9 +187,10 @@ Mandatory for calls: `recordType`, `recordingEntity`, `callDuration`,
 `causeForTerm`, `callReference`; `servedIMSI` additionally for the terminating
 case.
 
-Mandatory for short messages: `recordType`, `servedIMSI`, `msClassmark`,
-`serviceCentre`, `recordingEntity`, `messageReference`, and the originating or
-delivery timestamp.
+Mandatory for short messages in both directions: `recordType`, `servedIMSI`,
+`msClassmark`, `serviceCentre`, `recordingEntity`. The originating record adds
+`messageReference` and `originationTime`; the terminating record has no
+`messageReference` and carries `deliveryTime` in its place.
 
 **Credit control in the circuit-switched domain** works through CAMEL rather
 than Diameter: the switch suspends setup, consults the prepaid platform, and the
@@ -234,13 +259,21 @@ reasons may be set at once. A service data entry closes on any of them,
 including quota management reasons that have no record-level equivalent:
 thresholds reached, quota exhausted, reauthorization, validity timeout.
 
-Bit positions of interest here: `qoSChange (0)`, `sGSNChange (1)`,
-`sGSNPLMNIDChange (2)`, `tariffTimeSwitch (3)`, `pDPContextRelease (4)`,
-`rATChange (5)`, `serviceIdledOut (6)`, `configurationChange (8)`,
-`serviceStop (9)`, `dCCATimeThresholdReached (10)`,
-`dCCAVolumeThresholdReached (11)`, `dCCATimeExhausted (13)`,
-`dCCAVolumeExhausted (14)`, `recordClosure (24)`, `timeLimit (25)`,
-`volumeLimit (26)`.
+The bits named in the module, which are the subset this platform sets or reads:
+`qoSChange (0)`, `sGSNChange (1)`, `sGSNPLMNIDChange (2)`,
+`tariffTimeSwitch (3)`, `pDPContextRelease (4)`, `rATChange (5)`,
+`serviceIdledOut (6)`, `configurationChange (8)`, `serviceStop (9)`,
+`dCCATimeThresholdReached (10)`, `dCCAVolumeThresholdReached (11)`,
+`dCCATimeExhausted (13)`, `dCCAVolumeExhausted (14)`,
+`dCCAValidityTimeout (15)`, `dCCAReauthorisationRequest (17)`,
+`dCCAContinueOngoingSession (18)`, `dCCATerminateOngoingSession (20)`,
+`cGI-SAIChange (21)`, `rAIChange (22)`, `recordClosure (24)`,
+`timeLimit (25)`, `volumeLimit (26)`, `envelopeClosure (28)`,
+`eCGIChange (29)`, `tAIChange (30)`, `userLocationChange (31)`.
+
+Positions the specification defines but the module does not name are omitted
+rather than renumbered. Bits are positional, so omitting a name changes no
+encoded byte and the gaps are the specification's own numbering.
 
 ### Extensions
 
@@ -284,7 +317,7 @@ AccountTransactionRecord ::= SEQUENCE {
   refillChannel       [13] RefillChannel OPTIONAL,
   voucherReference    [14] IA5String OPTIONAL,
   activationDate      [15] TimeStamp OPTIONAL,
-  recordExtensions    [16] RecordExtensions OPTIONAL
+  recordExtensions    [16] ManagementExtensions OPTIONAL
 }
 
 -- Original: no public standard covers prepaid top-up channels.
@@ -319,9 +352,9 @@ differ by timestamp.
 
 ## 3. Account lifecycle records
 
-**What they represent.** State changes on the account itself — activation,
-service-class change, expiry, barring. The account's own event log, written as
-state transitions.
+**What they represent.** State changes on the account itself. `LifecycleEvent`
+declares five: activation, expiry, barring, unbarring, service-class change.
+The account's own event log, written as state transitions.
 
 **Public basis.** Also an original design, framed with the account-state
 concepts of TS 32.296.
@@ -352,7 +385,7 @@ AccountLifecycleRecord ::= SEQUENCE {
   serviceClassAfter   [12] ServiceClass OPTIONAL,
   activationDate      [13] TimeStamp OPTIONAL,
   expiryDate          [14] TimeStamp OPTIONAL,
-  recordExtensions    [15] RecordExtensions OPTIONAL
+  recordExtensions    [15] ManagementExtensions OPTIONAL
 }
 ```
 
@@ -365,7 +398,7 @@ AccountLifecycleRecord ::= SEQUENCE {
 | ASN.1 abstract syntax | ITU-T X.680 |
 | BER encoding | ITU-T X.690 |
 | File header and record stream | 3GPP TS 32.297 |
-| `RecordType`, `IMSI`, `MSISDN`, `TimeStamp`, `CallDuration`, `RecordExtensions`, `CauseForRecClosing`, `LocationAreaAndCell` | 3GPP TS 32.298, `GenericChargingDataTypes` |
+| `RecordType`, `IMSI`, `MSISDN`, `TimeStamp`, `CallDuration`, `ManagementExtensions`, `CauseForRecClosing`, `LocationAreaAndCell` | 3GPP TS 32.298, `GenericChargingDataTypes` |
 | Voice and short message records | 3GPP TS 32.298, `CSChargingDataTypes` (MOCallRecord, MTCallRecord, MOSMSRecord, MTSMSRecord) |
 | Data session records and service data entries | 3GPP TS 32.298, `GPRSChargingDataTypes` (PGWRecord, ChangeOfServiceCondition) |
 | `nodeID`, `localSequenceNumber`, `recordSequenceNumber`, `chargingID`, `callReference` | 3GPP TS 32.298 |
@@ -424,9 +457,7 @@ MCC/MNC assignments and open geodata.
 ### Definitions to complete
 
 - The trimmed ASN.1 module is assembled and compiles: `docs/cdr-format.asn`.
-  All three feeds round-trip. Remaining definition work is the account
-  lifecycle duplicate key below.
-
+  All three feeds round-trip, and the duplicate key for every feed is defined.
 - The cross-source join key. Usage records carry IMSI and MSISDN; account
   records carry MSISDN and account identifier but no IMSI, so MSISDN is the
   only identifier common to all three — and because numbers are reissued, the

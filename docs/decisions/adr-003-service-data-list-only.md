@@ -16,10 +16,15 @@ cross-reference each other.
 
 Populate the service data list only. The traffic volume list is not emitted.
 
-Because service data entries carry no access technology field, the simulated
-node is configured to close the record when access technology changes. The
-record-level value then applies unambiguously to every entry the record
-contains.
+A service data entry may carry its own access technology — the specification
+defines `rATType` on the entry, as an optional field. It is not retained here.
+Carrying it would put the same dimension in two places, and an entry-level
+value that disagreed with the record-level one would have no defined
+resolution.
+
+Access technology is therefore taken from the record. For that to be
+unambiguous a record must not span two technologies, so the simulated node is
+configured to close the record when access technology changes.
 
 ## Alternatives
 
@@ -31,6 +36,10 @@ row — "video traffic on 4G" would be unanswerable.
 **Carry the traffic volume list only.** Rejected — it has no rating group
 dimension at all, which is the breakdown the daily marts need.
 
+**Retain `rATType` on the service data entry.** Rejected — it would allow a
+record to span technologies, at the cost of two sources for one dimension and
+no rule for reconciling them. Closing the record instead keeps one source.
+
 ## Consequences
 
 - Every row carries both its service and its access technology.
@@ -39,3 +48,6 @@ dimension at all, which is the breakdown the daily marts need.
 - Closing on access-technology change is a configuration assumption the
   specification permits. It is documented as an assumption, not presented as a
   requirement.
+- The assumption is load-bearing. Because `rATType` is omitted from the entry,
+  a record that did span technologies would attribute all of its entries to
+  whichever value the record carried, with nothing in the data to reveal it.
