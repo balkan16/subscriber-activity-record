@@ -1,0 +1,193 @@
+SubscriberActivityCDR
+    { itu-t(0) identified-organization(4) etsi(0) mobileDomain(0)
+      charging(5) subscriberActivityCDR(99) asn1Module(0) version1(1) }
+
+DEFINITIONS IMPLICIT TAGS ::=
+
+BEGIN
+
+AddressString       ::= OCTET STRING (SIZE(1..20))
+ISDN-AddressString  ::= AddressString
+IMEI                ::= OCTET STRING (SIZE(8))
+MSISDN              ::= ISDN-AddressString
+IMSI                ::= OCTET STRING (SIZE(3..8))
+TimeStamp           ::= OCTET STRING (SIZE(9))
+CallDuration        ::= INTEGER
+LocalSequenceNumber ::= INTEGER (0..4294967295)
+NodeID              ::= IA5String (SIZE(1..20))
+MessageReference    ::= OCTET STRING
+RecordingEntity     ::= AddressString
+Classmark           ::= OCTET STRING
+SmsTpDestinationNumber ::= OCTET STRING
+LocationAreaCode    ::= OCTET STRING (SIZE(2))
+CellId              ::= OCTET STRING (SIZE(2))
+ChargingID          ::= INTEGER (0..4294967295)
+RatingGroupId       ::= INTEGER
+DataVolumeGPRS      ::= INTEGER
+ServiceIdentifier       ::= INTEGER (0..4294967295)
+MSTimeZone              ::= OCTET STRING (SIZE(2))
+RATType                 ::= INTEGER (0..255)
+PLMN-Id                 ::= OCTET STRING (SIZE(3))
+AccessPointNameNI       ::= IA5String (SIZE(1..63))
+ChargingCharacteristics ::= OCTET STRING (SIZE(2))
+CauseForRecClosing      ::= INTEGER
+ServingNodeType         ::= ENUMERATED
+{ sGSN (0), pMIPSGW (1), gTPSGW (2), ePDG (3), hSGW (4), mME (5), tWAN (6) }
+GSNAddress              ::= OCTET STRING (SIZE(4..16))
+SMSResult               ::= INTEGER
+ManagementExtension ::= SEQUENCE
+{ identifier OBJECT IDENTIFIER, significance BOOLEAN DEFAULT FALSE, information OCTET STRING }
+ManagementExtensions    ::= SET OF ManagementExtension
+BCDDirectoryNumber    ::= OCTET STRING
+CallingNumber         ::= BCDDirectoryNumber
+CalledNumber          ::= BCDDirectoryNumber
+ConnectedNumber       ::= BCDDirectoryNumber
+Gsm-SCFAddress        ::= ISDN-AddressString
+RoamingNumber         ::= ISDN-AddressString
+DataVolume            ::= INTEGER
+CauseForTerm          ::= INTEGER
+CallReferenceNumber   ::= OCTET STRING
+NetworkCallReference  ::= CallReferenceNumber
+ServiceKey            ::= INTEGER (0..2147483647)
+LocationCellExtension ::= BIT STRING (SIZE(12))
+SystemType ::= ENUMERATED { unknown (0), iuUTRAN (1), gERAN (2) }
+NodeAddress ::= IA5String (SIZE(1..64))
+LevelOfCAMELService ::= BIT STRING { basic (0), onlineCharging (1), callDurSupervision (2) }
+LocationChange ::= SEQUENCE { location [0] LocationAreaAndCell, changeTime [1] TimeStamp }
+ServiceConditionChange ::= BIT STRING
+{
+    qoSChange (0), sGSNChange (1), sGSNPLMNIDChange (2), tariffTimeSwitch (3),
+    pDPContextRelease (4), rATChange (5), serviceIdledOut (6), configurationChange (8),
+    serviceStop (9), dCCATimeThresholdReached (10), dCCAVolumeThresholdReached (11),
+    dCCATimeExhausted (13), dCCAVolumeExhausted (14), dCCAValidityTimeout (15),
+    dCCAReauthorisationRequest (17), dCCAContinueOngoingSession (18),
+    dCCATerminateOngoingSession (20), cGI-SAIChange (21), rAIChange (22),
+    recordClosure (24), timeLimit (25), volumeLimit (26), envelopeClosure (28),
+    eCGIChange (29), tAIChange (30), userLocationChange (31)
+}
+RecordType ::= INTEGER
+{ moCallRecord (0), mtCallRecord (1), moSMSRecord (6), mtSMSRecord (7), pGWRecord (85) }
+AccountRecordType ::= INTEGER { refill (0), adjustment (1) }
+ChangeOfServiceCondition ::= SET
+{
+    ratingGroup            [1] RatingGroupId,
+    timeOfFirstUsage       [5] TimeStamp OPTIONAL,
+    timeOfLastUsage        [6] TimeStamp OPTIONAL,
+    timeUsage              [7] CallDuration OPTIONAL,
+    serviceConditionChange [8] ServiceConditionChange,
+    datavolumeFBCUplink   [12] DataVolumeGPRS OPTIONAL,
+    datavolumeFBCDownlink [13] DataVolumeGPRS OPTIONAL,
+    timeOfReport          [14] TimeStamp,
+    serviceIdentifier     [17] ServiceIdentifier OPTIONAL
+}
+CAMELSMSInformation ::= SET
+{ gsm-SCFAddress [1] Gsm-SCFAddress OPTIONAL, serviceKey [2] ServiceKey OPTIONAL }
+LocationAreaAndCell ::= SEQUENCE
+{ locationAreaCode [0] LocationAreaCode, cellId [1] CellId }
+MoneyAmount ::= SEQUENCE { valueDigits INTEGER, exponent INTEGER }
+AccountID       ::= IA5String
+TransactionID	::=	IA5String
+ServiceClass	::= INTEGER
+LifecycleEvent	::= ENUMERATED
+{ activation (0), expiry (1), barring (2), unbarring (3), classChange (4) }
+AccountFlags    ::=	BIT STRING { barred (0), suspended (1), expired (2) }
+RequestedAction	::=	ENUMERATED { directDebiting (0), refund (1), checkBalance (2) }
+FileClosureReason ::= ENUMERATED { sizeCeiling (0), timeLimit (1) }
+RefillChannel ::= ENUMERATED
+{
+  retailerPOS (0), modernRetail (1), selfcareApp (2), mobileBanking (3), smsBanking (4),
+  internetBanking (5), atm (6), eWallet (7), eCommerce (8), physicalVoucher (9), ussd (10)
+}
+UsageCdrFile ::= SEQUENCE OF UsageRecord
+UsageRecord ::= CHOICE {
+  fileHeader [0] FileHeaderRecord, moCall [1] MOCallRecord, mtCall [2] MTCallRecord,
+  moSMS [3] MOSMSRecord, mtSMS [4] MTSMSRecord, data [5] PGWRecord }
+MOCallRecord ::= SET
+{
+	recordType [0] RecordType, servedIMSI [1] IMSI OPTIONAL, servedIMEI [2] IMEI OPTIONAL,
+	servedMSISDN [3] MSISDN OPTIONAL, callingNumber [4] CallingNumber OPTIONAL,
+	calledNumber [5] CalledNumber OPTIONAL, roamingNumber [8] RoamingNumber OPTIONAL,
+	recordingEntity [9] RecordingEntity, location [12] LocationAreaAndCell OPTIONAL,
+	changeOfLocation [13] SEQUENCE OF LocationChange OPTIONAL, callDuration [25] CallDuration,
+	dataVolume [26] DataVolume OPTIONAL, causeForTerm [30] CauseForTerm,
+	callReference [32] CallReferenceNumber, sequenceNumber [33] INTEGER OPTIONAL,
+	recordExtensions [35] ManagementExtensions OPTIONAL, serviceKey [37] ServiceKey OPTIONAL,
+	networkCallReference [38] NetworkCallReference OPTIONAL,
+	levelOfCAMELService [52] LevelOfCAMELService OPTIONAL
+}
+MTCallRecord ::= SET
+{
+	recordType [0] RecordType, servedIMSI [1] IMSI OPTIONAL, servedIMEI [2] IMEI OPTIONAL,
+	servedMSISDN [3] MSISDN OPTIONAL, callingNumber [4] CallingNumber OPTIONAL,
+	connectedNumber [5] ConnectedNumber OPTIONAL, recordingEntity [6] RecordingEntity,
+	roamingNumber [8] RoamingNumber OPTIONAL, location [12] LocationAreaAndCell OPTIONAL,
+	changeOfLocation [13] SEQUENCE OF LocationChange OPTIONAL, callDuration [22] CallDuration,
+	dataVolume [26] DataVolume OPTIONAL, causeForTerm [30] CauseForTerm,
+	callReference [32] CallReferenceNumber, sequenceNumber [33] INTEGER OPTIONAL,
+	recordExtensions [35] ManagementExtensions OPTIONAL, serviceKey [37] ServiceKey OPTIONAL,
+	networkCallReference [38] NetworkCallReference OPTIONAL
+}
+MOSMSRecord ::= SET
+{
+	recordType [0] RecordType, servedIMSI [1] IMSI, servedIMEI [2] IMEI OPTIONAL,
+	servedMSISDN [3] MSISDN OPTIONAL, msClassmark [4] Classmark,
+	serviceCentre [5] AddressString, recordingEntity [6] RecordingEntity,
+	location [7] LocationAreaAndCell OPTIONAL, messageReference [8] MessageReference,
+	originationTime [9] TimeStamp, smsResult [10] SMSResult OPTIONAL,
+	recordExtensions [11] ManagementExtensions OPTIONAL,
+	destinationNumber [12] SmsTpDestinationNumber OPTIONAL,
+	cAMELSMSInformation [13] CAMELSMSInformation OPTIONAL
+}
+MTSMSRecord ::= SET
+{
+	recordType [0] RecordType, serviceCentre [1] AddressString, servedIMSI [2] IMSI,
+	servedIMEI [3] IMEI OPTIONAL, servedMSISDN [4] MSISDN OPTIONAL, msClassmark [5] Classmark,
+	recordingEntity [6] RecordingEntity, location [7] LocationAreaAndCell OPTIONAL,
+	deliveryTime [8] TimeStamp, smsResult [9] SMSResult OPTIONAL,
+	recordExtensions [10] ManagementExtensions OPTIONAL, systemType [11] SystemType OPTIONAL,
+	cAMELSMSInformation [12] CAMELSMSInformation OPTIONAL,
+	locationExtension [13] LocationCellExtension OPTIONAL
+}
+PGWRecord ::= SET
+{
+	recordType [0] RecordType, servedIMSI [3] IMSI OPTIONAL, p-GWAddress [4] GSNAddress,
+	chargingID [5] ChargingID, servingNodeAddress [6] SEQUENCE OF GSNAddress,
+	accessPointNameNI [7] AccessPointNameNI OPTIONAL, recordOpeningTime [13] TimeStamp,
+	duration [14] CallDuration, causeForRecClosing [15] CauseForRecClosing,
+	recordSequenceNumber [17] INTEGER OPTIONAL, nodeID [18] NodeID OPTIONAL,
+	localSequenceNumber [20] LocalSequenceNumber OPTIONAL, servedMSISDN [22] MSISDN OPTIONAL,
+	chargingCharacteristics [23] ChargingCharacteristics,
+	servingNodePLMNIdentifier [27] PLMN-Id OPTIONAL, servedIMEI [29] IMEI OPTIONAL,
+	rATType [30] RATType OPTIONAL, mSTimeZone [31] MSTimeZone OPTIONAL,
+	cAMELChargingInformation [33] OCTET STRING OPTIONAL,
+	listOfServiceData [34] SEQUENCE OF ChangeOfServiceCondition OPTIONAL,
+	servingNodeType [35] ServingNodeType
+}
+FileHeaderRecord ::= SEQUENCE {
+  fileLength [1] INTEGER, fileSequenceNumber [2] INTEGER, senderNodeId [3] NodeID,
+  fileOpenTimeStamp [4] TimeStamp, lastAppendTimeStamp [5] TimeStamp,
+  recordCount [6] INTEGER, fileClosureReason [7] FileClosureReason,
+  lostRecordIndicator [8] BOOLEAN }
+AccountTxnCdrFile ::= SEQUENCE OF AccountTxnRecord
+AccountTxnRecord ::= CHOICE {
+  fileHeader [0] FileHeaderRecord, transaction [1] AccountTransactionRecord }
+AccountTransactionRecord ::= SEQUENCE {
+  accountRecordType [0] AccountRecordType, recordNumber [1] INTEGER, originNode [2] NodeID,
+  originHost [3] NodeAddress, transactionId [4] TransactionID, eventTimeStamp [5] TimeStamp,
+  requestedAction [6] RequestedAction, transactionAmount [7] MoneyAmount,
+  accountId [8] AccountID, servedMSISDN [9] MSISDN, serviceClass [10] ServiceClass,
+  balanceBefore [11] MoneyAmount, balanceAfter [12] MoneyAmount,
+  refillChannel [13] RefillChannel OPTIONAL, voucherReference [14] IA5String OPTIONAL,
+  activationDate [15] TimeStamp OPTIONAL, recordExtensions [16] ManagementExtensions OPTIONAL }
+AccountLifecycleCdrFile ::= SEQUENCE OF AccountLifecycleEntry
+AccountLifecycleEntry ::= CHOICE {
+  fileHeader [0] FileHeaderRecord, lifecycle [1] AccountLifecycleRecord }
+AccountLifecycleRecord ::= SEQUENCE {
+  recordNumber [1] INTEGER, accountId [2] AccountID, servedMSISDN [3] MSISDN,
+  serviceClass [4] ServiceClass, eventTimeStamp [5] TimeStamp,
+  lifecycleEvent [6] LifecycleEvent, balanceBefore [7] MoneyAmount,
+  balanceAfter [8] MoneyAmount, accountFlagsBefore [9] AccountFlags,
+  accountFlagsAfter [10] AccountFlags, serviceClassBefore [11] ServiceClass OPTIONAL,
+  serviceClassAfter [12] ServiceClass OPTIONAL, activationDate [13] TimeStamp OPTIONAL,
+  expiryDate [14] TimeStamp OPTIONAL, recordExtensions [15] ManagementExtensions OPTIONAL }
+END
