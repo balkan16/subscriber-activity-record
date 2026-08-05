@@ -29,7 +29,7 @@ operational system.
 | File container | header record + record stream | 3GPP TS 32.297 |
 | Record framing | `CHOICE` of variants, tagged by `RecordType` | 3GPP TS 32.298 |
 | Common types | `RecordType`, `IMSI` (TBCD-STRING), `MSISDN` (ISDN-AddressString), `TimeStamp`, `CallDuration`, `RecordExtensions` | 3GPP TS 32.298, `GenericChargingDataTypes` |
-| Money | `MoneyAmount ::= SEQUENCE { valueDigits, exponent }` — exact decimal `valueDigits × 10^exponent` | IETF RFC 4006 unit-value shape |
+| Money (account feeds only) | `MoneyAmount ::= SEQUENCE { valueDigits, exponent }` — exact decimal `valueDigits × 10^exponent`. Usage records carry no monetary value | IETF RFC 4006 unit-value shape |
 
 **Time.** `TimeStamp` carries local time with a signed offset, not UTC.
 Processing preserves local time end to end.
@@ -50,6 +50,12 @@ FileHeaderRecord ::= SEQUENCE {
   lostRecordIndicator  [8] BOOLEAN           -- upstream signalled loss
 }
 ```
+
+**File types.** Each feed has its own file type — `UsageCdrFile`,
+`AccountTxnCdrFile`, `AccountLifecycleCdrFile` — declared as a sequence of a
+choice whose first alternative is the file header. These describe file
+structure; decoding is per record, since decoding a whole file at once would
+defeat the bounded-memory design.
 
 **File closure.** A file closes on whichever comes first: a size ceiling
 (assumed 10 MB) or a maximum open interval. Arrival is therefore irregular —
@@ -86,12 +92,18 @@ Deviations, stated explicitly:
   plain equivalents. Encoded bytes are unaffected; only a length constraint is
   lost.
 - Types imported from non-charging specifications are replaced with minimal
-  local equivalents, each commented with its origin module.
+  local equivalents: `AddressString` and `ISDN-AddressString` from the MAP
+  common types, `ManagementExtension` from X.721.
+- Composite types outside the platform's scope are simplified to their
+  underlying carriers: `GSNAddress` to an octet string rather than the address
+  choice, `SMSResult` to an integer rather than the diagnostics type, and
+  `IMSI` and `Classmark` to octet strings.
 - `listOfTrafficVolumes` is not populated. Records carry `listOfServiceData`
   only.
-- Fields the specification marks OPTIONAL that this platform always emits —
-  `servedMSISDN`, `nodeID`, `localSequenceNumber` — are declared mandatory. A
-  tightening, not a relaxation.
+- Fields the specification marks OPTIONAL that this platform always emits are
+  declared mandatory on `PGWRecord`: `servedMSISDN`, and `nodeID` with
+  `localSequenceNumber`, which together form the duplicate key that ingestion
+  depends on. A tightening, not a relaxation.
 
 ### Data sessions
 
@@ -112,6 +124,25 @@ group per set of charging conditions. Within it, mandatory: `ratingGroup`,
 `datavolumeFBCUplink`, `datavolumeFBCDownlink`.
 
 Volumes are of type `DataVolumeGPRS`, in octets.
+
+**Credit control.** In prepaid operation a quota is granted before use and
+re-authorised as it depletes. Each entry corresponds to one grant period, and
+`serviceConditionChange` records why it ended: a threshold reached, quota
+exhausted, a re-authorisation request, or a validity timeout. `chargingCharacteristics` at record level carries the
+subscriber's charging profile.
+
+The specification also defines fields recording the charging system's answer,
+the time-quota mechanism, and failure handling. They are not retained: the
+closure reasons already identify the quota events, and nothing in the platform
+consumes the additional detail.
+
+Entry boundaries are therefore produced by quota events in the generator, not by
+arbitrary intervals — otherwise the closure reasons would be decorative.
+
+**No monetary values.** The specification defines no charge, cost, or balance
+field on usage records: rating occurs after a record is written. Usage records
+state what was consumed; the account feeds state what it cost and what the
+balance did.
 
 **Access technology.** `rATType` is a record-level field; the service data
 entries do not carry it. The simulated node is configured to close the record
@@ -135,6 +166,15 @@ case.
 Mandatory for short messages: `recordType`, `servedIMSI`, `msClassmark`,
 `serviceCentre`, `recordingEntity`, `messageReference`, and the originating or
 delivery timestamp.
+
+**Credit control in the circuit-switched domain** works through CAMEL rather
+than Diameter: the switch suspends setup, consults the prepaid platform, and the
+platform can end the call when credit runs out. Call records therefore retain
+`serviceKey`, with `levelOfCAMELService` on the originating record where the
+supervision flag indicates the prepaid platform was watching the call against
+the balance. Message records retain `cAMELSMSInformation`. The cause value `cAMELInitCallRelease (5)` means the
+prepaid platform terminated the call. Without these fields the voice and message
+records would look postpaid while the data records look prepaid.
 
 Note that circuit-switched records carry `causeForTerm`, not
 `causeForRecClosing`. The specification states there is no direct correlation
@@ -228,7 +268,7 @@ AccountTxnRecord ::= CHOICE {
 }
 
 AccountTransactionRecord ::= SEQUENCE {
-  recordType           [0] RecordType,          -- refill | adjustment
+  accountRecordType    [0] AccountRecordType,   -- refill | adjustment
   recordNumber         [1] INTEGER,             -- position within the file
   originNode           [2] NodeID,
   originHost           [3] NodeAddress,
@@ -287,13 +327,13 @@ AccountLifecycleEntry ::= CHOICE {
 }
 
 AccountLifecycleRecord ::= SEQUENCE {
-  recordType           [0] RecordType,
   recordNumber         [1] INTEGER,
   accountId            [2] AccountID,
   servedMSISDN         [3] MSISDN,
   serviceClass         [4] ServiceClass,
   eventTimeStamp       [5] TimeStamp,
-  lifecycleEvent       [6] LifecycleEvent,      -- ACTIVATION | EXPIRY | BARRING | SERVICE_CLASS_CHANGE
+  lifecycleEvent       [6] LifecycleEvent,      -- the record carries no record-type
+                                                -- field; the event names itself
   balanceBefore        [7] MoneyAmount,
   balanceAfter         [8] MoneyAmount,
   accountFlagsBefore   [9] AccountFlags,
@@ -373,13 +413,9 @@ MCC/MNC assignments and open geodata.
 
 ### Definitions to complete
 
-- Assemble the trimmed ASN.1 module. Specification types are copied from the
-  published modules; local equivalents are needed for the handful imported from
-  non-charging specifications, principally `ISDN-AddressString` and
-  `ManagementExtension`. Types with no specification source — `AccountID`,
-  `TransactionID`, `ServiceClass`, `RequestedAction`, `LifecycleEvent`,
-  `AccountFlags`, `RefillChannel`, `FileClosureReason`, `MoneyAmount` — are
-  original and marked as such.
+- The trimmed ASN.1 module is assembled and compiles: `docs/cdr-format.asn`.
+  All three feeds round-trip. Remaining definition work is the account
+  lifecycle duplicate key below.
 - The duplicate key for account lifecycle records. Transaction records use
   origin node with transaction identifier; lifecycle records carry neither.
 - The cross-source join key. Usage records carry IMSI and MSISDN; account
