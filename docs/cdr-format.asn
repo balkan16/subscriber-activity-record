@@ -68,7 +68,7 @@ ServiceConditionChange ::= BIT STRING
 RecordType ::= INTEGER
 { moCallRecord (0), mtCallRecord (1), moSMSRecord (6), mtSMSRecord (7), pGWRecord (85) }
 AccountRecordType ::= INTEGER { refill (0), adjustment (1) }
-ChangeOfServiceCondition ::= SET
+ChangeOfServiceCondition ::= SEQUENCE
 {
     ratingGroup            [1] RatingGroupId,
     timeOfFirstUsage       [5] TimeStamp OPTIONAL,
@@ -117,15 +117,16 @@ MOCallRecord ::= SET
 }
 MTCallRecord ::= SET
 {
-	recordType [0] RecordType, servedIMSI [1] IMSI OPTIONAL, servedIMEI [2] IMEI OPTIONAL,
-	servedMSISDN [3] MSISDN OPTIONAL, callingNumber [4] CallingNumber OPTIONAL,
+	recordType [0] RecordType, servedIMSI [1] IMSI, servedIMEI [2] IMEI OPTIONAL,
+	servedMSISDN [3] CalledNumber OPTIONAL, callingNumber [4] CallingNumber OPTIONAL,
 	connectedNumber [5] ConnectedNumber OPTIONAL, recordingEntity [6] RecordingEntity,
-	roamingNumber [8] RoamingNumber OPTIONAL, location [12] LocationAreaAndCell OPTIONAL,
-	changeOfLocation [13] SEQUENCE OF LocationChange OPTIONAL, callDuration [22] CallDuration,
-	dataVolume [26] DataVolume OPTIONAL, causeForTerm [30] CauseForTerm,
-	callReference [32] CallReferenceNumber, sequenceNumber [33] INTEGER OPTIONAL,
-	recordExtensions [35] ManagementExtensions OPTIONAL, serviceKey [37] ServiceKey OPTIONAL,
-	networkCallReference [38] NetworkCallReference OPTIONAL
+	location [9] LocationAreaAndCell OPTIONAL,
+	changeOfLocation [10] SEQUENCE OF LocationChange OPTIONAL, callDuration [22] CallDuration,
+	dataVolume [23] DataVolume OPTIONAL, causeForTerm [27] CauseForTerm,
+	callReference [29] CallReferenceNumber, sequenceNumber [30] INTEGER OPTIONAL,
+	recordExtensions [32] ManagementExtensions OPTIONAL,
+	networkCallReference [33] NetworkCallReference OPTIONAL,
+	serviceKey [45] ServiceKey OPTIONAL
 }
 MOSMSRecord ::= SET
 {
@@ -155,13 +156,14 @@ PGWRecord ::= SET
 	accessPointNameNI [7] AccessPointNameNI OPTIONAL, recordOpeningTime [13] TimeStamp,
 	duration [14] CallDuration, causeForRecClosing [15] CauseForRecClosing,
 	recordSequenceNumber [17] INTEGER OPTIONAL, nodeID [18] NodeID,
+	recordExtensions [19] ManagementExtensions OPTIONAL,
 	localSequenceNumber [20] LocalSequenceNumber, servedMSISDN [22] MSISDN,
 	chargingCharacteristics [23] ChargingCharacteristics,
 	servingNodePLMNIdentifier [27] PLMN-Id OPTIONAL, servedIMEI [29] IMEI OPTIONAL,
 	rATType [30] RATType OPTIONAL, mSTimeZone [31] MSTimeZone OPTIONAL,
 	cAMELChargingInformation [33] OCTET STRING OPTIONAL,
 	listOfServiceData [34] SEQUENCE OF ChangeOfServiceCondition OPTIONAL,
-	servingNodeType [35] ServingNodeType
+	servingNodeType [35] SEQUENCE OF ServingNodeType
 }
 FileHeaderRecord ::= SEQUENCE {
   fileLength [1] INTEGER, fileSequenceNumber [2] INTEGER, senderNodeId [3] NodeID,
