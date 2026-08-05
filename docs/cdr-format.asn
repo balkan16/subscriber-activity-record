@@ -183,7 +183,8 @@ AccountLifecycleCdrFile ::= SEQUENCE OF AccountLifecycleEntry
 AccountLifecycleEntry ::= CHOICE {
   fileHeader [0] FileHeaderRecord, lifecycle [1] AccountLifecycleRecord }
 AccountLifecycleRecord ::= SEQUENCE {
-  recordNumber [1] INTEGER, accountId [2] AccountID, servedMSISDN [3] MSISDN,
+  recordNumber [1] INTEGER, originNode [16] NodeID, originHost [17] NodeAddress,
+  accountId [2] AccountID, servedMSISDN [3] MSISDN,
   serviceClass [4] ServiceClass, eventTimeStamp [5] TimeStamp,
   lifecycleEvent [6] LifecycleEvent, balanceBefore [7] MoneyAmount,
   balanceAfter [8] MoneyAmount, accountFlagsBefore [9] AccountFlags,

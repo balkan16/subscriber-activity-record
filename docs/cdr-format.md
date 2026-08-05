@@ -307,6 +307,14 @@ The before-and-after pair yields a chaining invariant: for one account ordered
 by transaction time, `balanceAfter` of one movement equals `balanceBefore` of
 the next. Breaks are surfaced.
 
+Duplicate keys differ between the two account feeds. A transaction is
+identified by its origin node with the transaction identifier. A lifecycle
+record carries no transaction identifier, so it is identified compositely: the
+origin node, the account, the event, and the event timestamp. The composite
+holds because one account cannot undergo the same event at the same node at the
+same instant; repeated events — an account barred, unbarred, and barred again —
+differ by timestamp.
+
 ---
 
 ## 3. Account lifecycle records
@@ -328,6 +336,8 @@ AccountLifecycleEntry ::= CHOICE {
 
 AccountLifecycleRecord ::= SEQUENCE {
   recordNumber         [1] INTEGER,
+  originNode          [16] NodeID,              -- provenance
+  originHost          [17] NodeAddress,
   accountId            [2] AccountID,
   servedMSISDN         [3] MSISDN,
   serviceClass         [4] ServiceClass,
@@ -416,8 +426,7 @@ MCC/MNC assignments and open geodata.
 - The trimmed ASN.1 module is assembled and compiles: `docs/cdr-format.asn`.
   All three feeds round-trip. Remaining definition work is the account
   lifecycle duplicate key below.
-- The duplicate key for account lifecycle records. Transaction records use
-  origin node with transaction identifier; lifecycle records carry neither.
+
 - The cross-source join key. Usage records carry IMSI and MSISDN; account
   records carry MSISDN and account identifier but no IMSI, so MSISDN is the
   only identifier common to all three — and because numbers are reissued, the
