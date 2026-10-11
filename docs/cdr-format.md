@@ -187,6 +187,11 @@ Mandatory for calls: `recordType`, `recordingEntity`, `callDuration`,
 `causeForTerm`, `callReference`; `servedIMSI` additionally for the terminating
 case.
 
+Calls also retain `answerTime` (`[23]` on the originating record, `[20]` on the
+terminating record), optional in the specification. It is the only field that
+places a call in time; without it a call could not be ordered or assigned to a
+day. The generator always emits it.
+
 Mandatory for short messages in both directions: `recordType`, `servedIMSI`,
 `msClassmark`, `serviceCentre`, `recordingEntity`. The originating record adds
 `messageReference` and `originationTime`; the terminating record has no
