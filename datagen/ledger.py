@@ -51,6 +51,9 @@ class Ledger:
     def balance(self, msisdn):
         return self.accounts[msisdn].balance
 
+    def is_active(self, msisdn):
+        return not self.accounts[msisdn].flags
+
     def _omit(self):
         return self.rng.random() < self.omit_rate
 

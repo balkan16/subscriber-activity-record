@@ -96,3 +96,14 @@ def test_records_encode_and_round_trip(ledger):
         assert SPEC.decode('AccountTxnRecord', SPEC.encode('AccountTxnRecord', entry))[0] == 'transaction'
     for entry in lifecycle:
         assert SPEC.decode('AccountLifecycleEntry', SPEC.encode('AccountLifecycleEntry', entry))[0] == 'lifecycle'
+
+
+def test_is_active_follows_flags(ledger):
+    ledger.open_account(MSISDN, T0)
+    assert ledger.is_active(MSISDN)
+    ledger.bar(MSISDN, T0)
+    assert not ledger.is_active(MSISDN)
+    ledger.unbar(MSISDN, T0)
+    assert ledger.is_active(MSISDN)
+    ledger.expire(MSISDN, T0)
+    assert not ledger.is_active(MSISDN)
