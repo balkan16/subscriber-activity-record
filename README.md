@@ -1,173 +1,159 @@
-# Subscriber Activity Record — Customer Support
+# Subscriber Activity Record
 
-Data platform for a simulated prepaid mobile operator. Network usage and
-account events feed two consumption paths: a low-latency subscriber activity
-view for customer care, and daily marts for analytics.
+A data platform for a simulated prepaid mobile operator. It answers the question
+customer care hears most often: *"What happened on this number?"* Which calls,
+messages and data sessions used the line, and how the balance moved, available
+within 30 minutes of the event.
 
-All data is synthetic. The generator reproduces the delivery patterns,
-encoding, and defects of operational telecom sources.
+All data is synthetic. A generator produces the same kind of binary files a real
+network produces, including their delivery patterns and their defects.
 
-## Goals
-
-- Ingest binary-encoded CDRs with bounded memory
-- Resolve coded network attributes against externally maintained reference data
-- Serve usage and account history lookups within 30 minutes of the event
-  occurring, measured and reported rather than asserted
-- Produce complete daily marts with a defined late-data policy
-- Idempotent ingestion and quarantine over silent loss
-- Reproducible on local or free-tier infrastructure
-
-## Non-goals
-
-- **Billing, rating, and charging.** CDRs are consumed for operational
-  visibility, not revenue computation
-- **Real-time processing.** The design is micro-batch; freshness is measured,
-  not instantaneous
-- **Production hardening.** Authentication, multi-tenancy, and user interfaces
-  are outside this scope
-
-## Sources
-
-Three synthetic feeds, each with a distinct structural archetype:
-
-| Source | Grain | Structure |
-|---|---|---|
-| Usage | One call or data session, or one interval of a longer one | Tagged union of record types, deep optionality, a nested list of per-quota-bucket containers, and an extension list for later additions |
-| Account transaction | One financial movement — top-up or adjustment | Flat and positional; carries account state before and after the movement |
-| Account lifecycle | One state change — activation, class change, expiry, barring | Flat and positional; a tagged union of many event variants |
-
-Usage records are the largest and most complex of the three. Their record
-syntax follows a trimmed subset of 3GPP TS 32.298 and file framing follows
-TS 32.297; the account feeds use original schemas, as no public standard covers
-them. Full specification: [`docs/cdr-format.md`](docs/cdr-format.md).
-
-## Architecture
+## In one picture
 
 ```
-generator ──▶ landing (encoded) ──▶ mediation decoder ──▶ landing (decoded)
-                                                                  │
-                                                                  ▼
-                                                       bronze   raw, as delivered
-                                                                  │
-                                                                  ▼
-                                                       silver   normalize · dedupe
-                                                                late data · enrich
-                                                                quality expectations
-                                                                  │
-                                                  ┌───────────────┴───────────────┐
-                                                  │                               │
-                                                  ▼                               ▼
-                                    usage · account APIs             gold  daily marts
-                                                                                  │
-                                                                                  ▼
-                                                                          analytical SQL
+generator ──▶ binary CDR files ──▶ decoder ──▶ bronze ──▶ silver ──┬──▶ history APIs   (customer care)
+                                                                    └──▶ gold marts     (analytics)
 ```
 
-| Component | Responsibility | Runtime |
+1. **Generator** writes three kinds of binary file, the way network and charging
+   systems do.
+2. **Decoder** reads each file one record at a time, using a fixed amount of
+   memory however large the file, and writes plain columnar files.
+3. **Bronze** stores what arrived, unchanged.
+4. **Silver** cleans it: removes duplicates, handles late arrivals, looks up
+   codes, and runs quality checks.
+5. **History APIs** read silver and return a subscriber's recent activity.
+6. **Gold** holds daily summaries for analysis.
+
+## Terms used here
+
+| Term | Meaning |
+|---|---|
+| CDR | Call Detail Record: one record of network activity (a call, a message, part of a data session) |
+| ASN.1 / BER | The schema language and binary encoding telecom systems use for CDRs |
+| MSISDN | The subscriber's phone number |
+| Feed | One stream of files from one kind of source |
+| Bronze / silver / gold | Raw, cleaned, and summarised layers of the lakehouse |
+
+## The three feeds
+
+| Feed | One record is | Example |
 |---|---|---|
-| Generator | Synthetic subscribers, stateful events, reference tables, injected defects | Python |
-| Mediation decoder | Binary CDR files to columnar records under a fixed memory ceiling | Python |
-| Bronze | Append-only landing with source lineage | Spark |
-| Silver | Normalization, dedupe, late data, enrichment, quality gates | Spark |
-| Gold | Daily aggregates for analysis | Spark |
-| History APIs | Usage history and account history endpoints, with freshness metadata | Python |
-| Observability | Freshness, quarantine, and processing metrics | Python / SQL |
+| Usage | one call, one message, or one part of a data session | a 3-minute call; 40 minutes of mobile data |
+| Account transaction | one money movement | a top-up of 25,000; a 10 GB package purchase |
+| Account lifecycle | one change of account state | activation, barring, unbarring, class change, expiry |
 
-## Design decisions
+Each feed has its own file type and its own directory. Usage records follow a
+trimmed subset of the 3GPP standard (TS 32.298); each file starts with a header
+record modelled on TS 32.297, followed by the records back to back. The account
+feeds have no public standard, so their schemas are original.
 
-**Decode outside the distributed engine.** ASN.1 BER files expand roughly an
-order of magnitude in memory when decoded wholesale, and executors are the
-worst place to absorb that. A standalone decoder parses sequentially and emits
-bounded batches — the mediation stage of operational telecom architectures.
-Lakehouse input contract: decoded columnar files.
+Full format: [`docs/cdr-format.md`](docs/cdr-format.md) · grammar:
+[`docs/cdr-format.asn`](docs/cdr-format.asn)
 
-**Session fragments are preserved, not stitched.** A long session is emitted as
-several interim records, closed on volume or time limits. Ingestion keeps one
-row per record and carries identity and correlation fields through, so loads
-stay idempotent and nothing waits on a session that has not ended. Session
-totals are a derived aggregate, recomputed for the sessions a batch touches and
-marked open until a terminal record arrives.
+## The generator
 
-**Extensions are projected, not discarded.** Usage records carry an extension
-list for fields added after the base grammar. Extensions the platform consumes
-are resolved into typed columns and the remainder is retained, so fields
-introduced later can still be recovered from history.
+The generator does not try to simulate a whole network. It produces random
+activity, held to a few rules so the pipeline's checks have something real to
+test:
 
-**Micro-batch, not streaming.** The freshness requirement is 30 minutes from
-the moment an event occurs. Source files close on a size ceiling or a
-ten-minute maximum, so up to ten of those minutes are spent before the platform
-sees the record at all — the dominant cost, and one no processing choice can
-recover. Transfer and decode account for a few more. Polling the landing area
-each minute and processing what has arrived leaves the remaining budget
-comfortable, without the operational complexity of a continuous topology. The
-distribution is measured; if it approaches the requirement, arrival-triggered
-processing is the next step.
+- **One balance per subscriber.** Every top-up, purchase and lifecycle event
+  records the balance before and after, and each record's "before" equals the
+  previous record's "after", across both account feeds.
+- **Sessions hang together.** The records of one data session share one
+  correlation identifier and are numbered 1, 2, 3 with no gaps. Only the last
+  one carries an "ended" reason.
+- **Calls interrupt data.** Voice runs on 2G here, so a call closes the current
+  data record with a technology-change reason, and the session resumes after the
+  call ends.
+- **Blocked accounts are silent.** A barred or expired subscriber produces no
+  usage until the account is active again.
+- **Optional fields are sometimes missing**, as in real files, so the pipeline
+  has to cope with absent values.
 
-**Transactional table format.** Concurrent read and write, late-data
-restatement, and reference-data rewrites require atomic commits, snapshot
-isolation, and merge semantics — Delta Lake.
+| Module | Role |
+|---|---|
+| `datagen/packing.py` | Converts phone numbers, times and flag sets into the byte layouts the records require |
+| `datagen/writer.py` | Writes records to a binary file and reads them back |
+| `datagen/ledger.py` | Holds account state; produces transaction and lifecycle records |
+| `datagen/session.py` | Produces usage records: data sessions, calls, messages |
+| `datagen/activity.py` | Asks the ledger whether a subscriber may use the network before producing usage |
 
-**Two history endpoints, one grain.** Usage history and account history are
-separate lineages and separate endpoints; a consumer that needs both composes
-them. Both serve rows at the grain they are stored in, so nothing is aggregated
-or reshaped on the way out.
+## Key design decisions
 
-**Serving reads silver.** The APIs return rows at the grain they are stored
-in, so they read the enriched detail layer directly rather than a copy. Silver
-is partitioned by event date to keep a rolling-window lookup cheap. Gold holds
-daily aggregates for analytical use and is not on the serving path.
+Each decision has a record in [`docs/decisions/`](docs/decisions).
 
-**Versioned reference data.** Enrichment preserves the mapping in effect at
-event time, keeping historical outputs reproducible.
+- **Decode outside Spark.** Binary CDR files grow roughly tenfold in memory when
+  decoded all at once. A separate decoder reads one record at a time and hands
+  Spark plain columnar files. (ADR-004)
+- **Keep session parts as they arrive.** Long data sessions arrive as several
+  records. Each is stored as its own row; nothing waits for a session to end.
+  Session totals are calculated afterwards. (ADR-006)
+- **One row per charged unit.** A data record holds one container per charging
+  bucket; each container becomes a row. Calls and messages are one row each.
+  (ADR-007)
+- **Usage carries no money.** The standard has no cost field on usage records;
+  charges appear only in the account feeds. (ADR-015)
+- **Different duplicate keys per feed.** Each feed identifies a record by
+  different fields, so each has its own rule for spotting duplicates. (ADR-014)
+- **Micro-batch, not streaming.** Files close every ten minutes at most, which
+  already uses up a third of the 30-minute budget. Checking for new files every
+  minute is enough; continuous streaming would add complexity without
+  recovering that time. (ADR-010)
+- **APIs read silver.** The APIs return detail rows, so they read the cleaned
+  detail layer directly. Gold is for analysis only. (ADR-011)
+- **Scale is measured, not claimed.** The same pipeline runs at 1x, 2x, 5x and
+  10x volume; memory, time and freshness are recorded at each. (ADR-016)
 
-## Correctness
+## Correctness rules
 
-- **Idempotent ingestion** — reprocessing a file leaves table state unchanged
-- **Quarantine over loss** — failed records retained with a reason
-- **Unknown codes stay visible** — a code with no entry in the reference tables
-  is marked unresolved and counted, never guessed from a similar value or
-  dropped
-- **Grain is explicit** — a row is one charged unit: a quota bucket under one
-  set of charging conditions for data, a single event for calls and messages.
-  Serving and analytical layers share that grain, so no aggregation happens
-  silently between them
-- **Balance continuity** — account transactions carry state before and after
-  the movement; consecutive movements on an account are checked to chain, and
-  breaks are surfaced
-- **Unrecognized record variants** are retained and counted rather than skipped
-- **Late data** — rolling window on the interactive path; defined close and
-  restatement rule on the daily path
+- Reprocessing a file leaves every table unchanged.
+- Records that fail checks are kept aside with a reason, never silently dropped.
+- A code missing from the reference tables is flagged and counted, never guessed.
+- Consecutive balance records must chain; breaks are reported.
+- Unknown record types are kept and counted, not skipped.
+- Times stay in local time throughout.
 
-## Testing
+## Status
 
-Seeded scenarios assert exact output for scripted subscriber histories,
-including unresolved-code and late-arrival cases. Decoder memory ceiling
-asserted. Idempotency asserted by replay. Quality expectations run inside the
-pipeline.
+| Part | State |
+|---|---|
+| Record grammar (`docs/cdr-format.asn`) | done |
+| Generator: packing, file writer, ledger, usage sessions, status gate | done, tested |
+| Generator: subscriber population, event loop, defect injection | next |
+| Decoder | planned |
+| Bronze, silver, gold | planned |
+| History APIs | planned |
 
-## Stack
+Performance figures are published once measured; none are claimed in advance.
 
-Python · Spark · Delta Lake · FastAPI. Runs locally through Docker on
-open-source components, and on Databricks Free Edition unmodified.
+## Running the tests
+
+```bash
+python3 -m pip install asn1tools pytest
+python3 -m pytest tests/ -v
+```
+
+Run from the repository root.
 
 ## Layout
 
 ```
-datagen/      synthetic events and reference data
-mediation/    binary decode
+datagen/      synthetic data generator
+mediation/    binary decoder
 pipelines/    bronze, silver, gold
 serving/      history APIs
-docs/         format specification, design notes, decision records
-tests/        scenario and regression tests
+docs/         format specification, grammar, decision records
+tests/        tests
 ```
 
-## Status
+## Stack
 
-Design phase. Figures are published once measured; none are claimed in advance.
-Decisions: [`docs/decisions/`](docs/decisions)
+Python · asn1tools · Spark · Delta Lake · FastAPI. Runs locally on open-source
+components, and on Databricks Free Edition.
 
 ## Development notes
 
-AI-assisted for scaffolding, tests, and documentation. Architecture,
-transformation logic, and correctness properties are hand-authored. Significant
-choices are recorded as architecture decision records.
+AI-assisted for scaffolding, tests, documentation and parts of the generator.
+Architecture, record design and correctness rules are hand-authored. Significant
+choices are recorded as decision records.
